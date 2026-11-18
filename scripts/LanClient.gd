@@ -14,7 +14,7 @@ signal network_event_execute
 signal network_event_ended
 signal opponent_proof_received(image_base64: String)
 
-const SERVER_URL: String = "wss://ref-necessary-gulf-affected.trycloudflare.com"
+const SERVER_URL: String = "wss://applicant-differently-resolutions-recommends.trycloudflare.com"
 
 var room_code: String = ""
 var player_role: String = ""

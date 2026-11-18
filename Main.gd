@@ -165,12 +165,8 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if won:
-		if not multiplayer_active:
-			if (
-				event is InputEventScreenTouch
-				or event is InputEventMouseButton
-			) and event.is_pressed():
-				get_tree().call_deferred("reload_current_scene")
+		# В одиночном режиме после победы не перезапускаем игру
+		# касанием экрана. Для возврата используется кнопка карточки.
 		return
 
 	if event.device == InputEvent.DEVICE_ID_EMULATION:
@@ -303,13 +299,11 @@ func _physics_process(delta: float) -> void:
 		if countdown <= 0.0:
 			won = true
 			blocks.set_spawning_enabled(false)
-			sheet.set_finished(true)
 			events.stop_events()
 
 			if multiplayer_active and network != null:
 				network.send_goal_reached()
 			else:
-				visual.set_match_result("ПОБЕДА")
 				proof_label.text = "Одиночная игра"
 				_show_result_panel("ПОБЕДА")
 
@@ -366,9 +360,10 @@ func _on_match_result(result: String, message: String) -> void:
 
 	if result == "win":
 		won = true
-		sheet.set_finished(true)
 
-	visual.set_match_result(message)
+	# Результат показываем в карточке, не в центре игрового поля.
+	if result == "loss":
+		won = false
 
 	# Дожидаемся отрисовки финального игрового кадра перед снимком.
 	await get_tree().process_frame
@@ -383,7 +378,6 @@ func _on_opponent_left() -> void:
 	match_finished = true
 	blocks.set_spawning_enabled(false)
 	events.stop_events()
-	visual.set_match_result("СОПЕРНИК ОТКЛЮЧИЛСЯ")
 	proof_label.text = "Матч прерван"
 	_show_result_panel("СОПЕРНИК ОТКЛЮЧИЛСЯ")
 
@@ -456,8 +450,8 @@ func _build_result_ui() -> void:
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	result_root.add_child(shade)
 
-	# Panel вместо PanelContainer: размер карточки задаём сами,
-	# чтобы она не растягивалась ниже кнопки.
+	# Обычный Panel: его размер задаём вручную,
+	# поэтому он заканчивается сразу после кнопки.
 	result_panel = Panel.new()
 	result_panel.add_theme_stylebox_override(
 		"panel",
@@ -562,7 +556,6 @@ func _layout_result_ui() -> void:
 	var button_height := 44.0
 	var gap := 8.0
 
-	# Вычисляем высоту изображения так, чтобы панель помещалась на экран.
 	var fixed_height: float = (
 		top_padding * 2.0
 		+ title_height
@@ -570,14 +563,16 @@ func _layout_result_ui() -> void:
 		+ button_height
 		+ gap * 3.0
 	)
-	var max_image_height: float = maxf(60.0, screen_size.y - fixed_height - 24.0)
+	var max_image_height: float = maxf(
+		60.0,
+		screen_size.y - fixed_height - 24.0
+	)
 	var image_height: float = clampf(
 		screen_size.y * 0.38,
 		minf(90.0, max_image_height),
 		minf(360.0, max_image_height)
 	)
 
-	# Нижняя граница панели — сразу после кнопки и нижнего поля.
 	var panel_height: float = fixed_height + image_height
 	var content_width: float = panel_width - side_padding * 2.0
 
