@@ -37,7 +37,7 @@ var feedback_time := 0.0
 
 var result_layer: CanvasLayer
 var result_root: Control
-var result_panel: PanelContainer
+var result_panel: Panel
 var result_label: Label
 var proof_label: Label
 var proof_texture: TextureRect
@@ -228,7 +228,7 @@ func _begin(id: int, pos: Vector2) -> void:
 		minf(get_window().size.x, get_window().size.y) * SWIPE_FRACTION
 	)
 
-	var button := sheet.hit(pos)
+	var button: int = sheet.hit(pos)
 	consumed = button >= 0
 
 	if consumed:
@@ -310,6 +310,7 @@ func _physics_process(delta: float) -> void:
 				network.send_goal_reached()
 			else:
 				visual.set_match_result("ПОБЕДА")
+				proof_label.text = "Одиночная игра"
 				_show_result_panel("ПОБЕДА")
 
 	else:
@@ -327,22 +328,26 @@ func _physics_process(delta: float) -> void:
 	)
 
 	blocks.set_camera_y(camera.position.y)
-	_update_network_progress(top)
+	_update_network_progress(top, delta)
 	_update_visual()
 
 
-func _update_network_progress(top: float) -> void:
+func _update_network_progress(top: float, delta: float) -> void:
 	if not multiplayer_active or network == null or won:
 		return
 
-	progress_send_timer -= get_physics_process_delta_time()
+	progress_send_timer -= delta
 	if progress_send_timer > 0.0:
 		return
 
 	progress_send_timer = PROGRESS_SEND_INTERVAL
 
-	var total_height := PLATFORM_Y - TARGET_Y
-	var progress := clampf((PLATFORM_Y - top) / total_height, 0.0, 1.0)
+	var total_height: float = PLATFORM_Y - TARGET_Y
+	var progress: float = clampf(
+		(PLATFORM_Y - top) / total_height,
+		0.0,
+		1.0
+	)
 	network.send_progress(progress)
 
 
@@ -365,7 +370,7 @@ func _on_match_result(result: String, message: String) -> void:
 
 	visual.set_match_result(message)
 
-	# Даём кадру с итоговой башней отрисоваться до захвата изображения.
+	# Дожидаемся отрисовки финального игрового кадра перед снимком.
 	await get_tree().process_frame
 	_send_local_proof()
 	_show_result_panel(message)
@@ -379,6 +384,7 @@ func _on_opponent_left() -> void:
 	blocks.set_spawning_enabled(false)
 	events.stop_events()
 	visual.set_match_result("СОПЕРНИК ОТКЛЮЧИЛСЯ")
+	proof_label.text = "Матч прерван"
 	_show_result_panel("СОПЕРНИК ОТКЛЮЧИЛСЯ")
 
 
@@ -392,10 +398,19 @@ func _send_local_proof() -> void:
 		return
 
 	var largest_side: int = maxi(image.get_width(), image.get_height())
+
 	if largest_side > PROOF_MAX_DIMENSION:
-		var scale: float = float(PROOF_MAX_DIMENSION) / float(largest_side)
-		var new_width: int = maxi(1, int(round(float(image.get_width()) * scale)))
-		var new_height: int = maxi(1, int(round(float(image.get_height()) * scale)))
+		var scale_factor: float = (
+			float(PROOF_MAX_DIMENSION) / float(largest_side)
+		)
+		var new_width: int = maxi(
+			1,
+			int(round(float(image.get_width()) * scale_factor))
+		)
+		var new_height: int = maxi(
+			1,
+			int(round(float(image.get_height()) * scale_factor))
+		)
 		image.resize(new_width, new_height, Image.INTERPOLATE_LANCZOS)
 
 	image.convert(Image.FORMAT_RGB8)
@@ -438,42 +453,67 @@ func _build_result_ui() -> void:
 	var shade := ColorRect.new()
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.color = Color(0.0, 0.0, 0.0, 0.78)
+	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	result_root.add_child(shade)
 
-	result_panel = PanelContainer.new()
-	result_panel.add_theme_stylebox_override("panel", _make_result_panel_style())
+	# Panel вместо PanelContainer: размер карточки задаём сами,
+	# чтобы она не растягивалась ниже кнопки.
+	result_panel = Panel.new()
+	result_panel.add_theme_stylebox_override(
+		"panel",
+		_make_result_panel_style()
+	)
+	result_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	result_root.add_child(result_panel)
-
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
-	result_panel.add_child(column)
 
 	result_label = Label.new()
 	result_label.text = "МАТЧ ЗАВЕРШЁН"
 	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	result_label.add_theme_font_size_override("font_size", 18)
 	result_label.add_theme_color_override("font_color", Color("#f0f3f8"))
-	column.add_child(result_label)
+	result_panel.add_child(result_label)
 
 	proof_label = Label.new()
 	proof_label.text = "Ожидаем снимок соперника..."
 	proof_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	proof_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	proof_label.add_theme_font_size_override("font_size", 11)
 	proof_label.add_theme_color_override("font_color", Color("#a6b0c0"))
-	column.add_child(proof_label)
+	result_panel.add_child(proof_label)
 
 	proof_texture = TextureRect.new()
 	proof_texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	proof_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	column.add_child(proof_texture)
+	proof_texture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	result_panel.add_child(proof_texture)
 
 	menu_button = Button.new()
 	menu_button.text = "ГЛАВНОЕ МЕНЮ"
-	menu_button.custom_minimum_size.y = 44.0
+	menu_button.focus_mode = Control.FOCUS_ALL
 	menu_button.add_theme_font_size_override("font_size", 13)
+	menu_button.add_theme_color_override("font_color", Color("#f0f3f8"))
+	menu_button.add_theme_color_override("font_hover_color", Color("#ffffff"))
+	menu_button.add_theme_color_override("font_pressed_color", Color("#dce5f5"))
+	menu_button.add_theme_stylebox_override(
+		"normal",
+		_make_menu_button_style(0)
+	)
+	menu_button.add_theme_stylebox_override(
+		"hover",
+		_make_menu_button_style(1)
+	)
+	menu_button.add_theme_stylebox_override(
+		"pressed",
+		_make_menu_button_style(2)
+	)
+	menu_button.add_theme_stylebox_override(
+		"focus",
+		_make_menu_button_style(1)
+	)
 	menu_button.pressed.connect(_on_main_menu_pressed)
-	column.add_child(menu_button)
+	result_panel.add_child(menu_button)
 
 	_layout_result_ui()
 
@@ -484,10 +524,29 @@ func _make_result_panel_style() -> StyleBoxFlat:
 	style.border_color = Color(0.72, 0.80, 0.92, 0.85)
 	style.set_border_width_all(1)
 	style.set_corner_radius_all(8)
+	return style
+
+
+func _make_menu_button_style(state: int) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.set_corner_radius_all(6)
+	style.set_border_width_all(1)
 	style.content_margin_left = 12.0
 	style.content_margin_right = 12.0
-	style.content_margin_top = 12.0
-	style.content_margin_bottom = 12.0
+	style.content_margin_top = 8.0
+	style.content_margin_bottom = 8.0
+
+	match state:
+		0:
+			style.bg_color = Color(0.035, 0.045, 0.065, 0.96)
+			style.border_color = Color(0.58, 0.66, 0.79, 0.72)
+		1:
+			style.bg_color = Color(0.08, 0.11, 0.16, 0.99)
+			style.border_color = Color(0.82, 0.88, 0.98, 0.95)
+		2:
+			style.bg_color = Color(0.10, 0.14, 0.20, 1.0)
+			style.border_color = Color(0.74, 0.84, 1.0, 1.0)
+
 	return style
 
 
@@ -495,16 +554,55 @@ func _layout_result_ui() -> void:
 	if not is_instance_valid(result_panel):
 		return
 
-	var panel_width: float = minf(340.0, screen_size.x - 28.0)
-	var panel_height: float = minf(600.0, screen_size.y - 40.0)
-	var image_height: float = maxf(100.0, panel_height - 170.0)
+	var panel_width: float = minf(350.0, screen_size.x - 32.0)
+	var side_padding := 16.0
+	var top_padding := 16.0
+	var title_height := 32.0
+	var proof_label_height := 20.0
+	var button_height := 44.0
+	var gap := 8.0
+
+	# Вычисляем высоту изображения так, чтобы панель помещалась на экран.
+	var fixed_height: float = (
+		top_padding * 2.0
+		+ title_height
+		+ proof_label_height
+		+ button_height
+		+ gap * 3.0
+	)
+	var max_image_height: float = maxf(60.0, screen_size.y - fixed_height - 24.0)
+	var image_height: float = clampf(
+		screen_size.y * 0.38,
+		minf(90.0, max_image_height),
+		minf(360.0, max_image_height)
+	)
+
+	# Нижняя граница панели — сразу после кнопки и нижнего поля.
+	var panel_height: float = fixed_height + image_height
+	var content_width: float = panel_width - side_padding * 2.0
 
 	result_panel.position = Vector2(
 		(screen_size.x - panel_width) * 0.5,
 		(screen_size.y - panel_height) * 0.5
 	)
 	result_panel.size = Vector2(panel_width, panel_height)
-	proof_texture.custom_minimum_size = Vector2(panel_width - 28.0, image_height)
+
+	var y := top_padding
+
+	result_label.position = Vector2(side_padding, y)
+	result_label.size = Vector2(content_width, title_height)
+	y += title_height + gap
+
+	proof_label.position = Vector2(side_padding, y)
+	proof_label.size = Vector2(content_width, proof_label_height)
+	y += proof_label_height + gap
+
+	proof_texture.position = Vector2(side_padding, y)
+	proof_texture.size = Vector2(content_width, image_height)
+	y += image_height + gap
+
+	menu_button.position = Vector2(side_padding, y)
+	menu_button.size = Vector2(content_width, button_height)
 
 
 func _show_result_panel(message: String) -> void:
