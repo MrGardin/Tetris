@@ -19,6 +19,8 @@ const SHAPES := [
 class Piece extends RigidBody2D:
 	var tile_angles: Array[float] = []
 	var binding := false
+	# Permanent visual marker only; never enables additional welding.
+	var bound_visual := false
 	var binding_resolving := false
 	var levitation_pending := false
 	var anchored := false
@@ -62,9 +64,9 @@ class Piece extends RigidBody2D:
 	func _process(delta: float) -> void:
 		if purge_marked and not purge_committed:
 			purge_clock += delta
-		if binding or levitation_pending or anchored:
+		if binding or bound_visual or levitation_pending or anchored:
 			effect_clock += delta
-		if purge_marked or binding or levitation_pending or anchored:
+		if purge_marked or binding or bound_visual or levitation_pending or anchored:
 			queue_redraw()
 
 	func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
@@ -110,7 +112,7 @@ class Piece extends RigidBody2D:
 			var outer := Rect2(-Vector2.ONE * half, Vector2.ONE * TILE_SIZE)
 			draw_rect(outer, Color("#05070b"))
 			draw_rect(outer.grow(-TILE_BORDER), Color("#ff273d") if flash else Color("#e9edf3"))
-			if binding:
+			if binding or bound_visual:
 				# Two animated tendrils wrap each tile.
 				for strand in 2:
 					var line := PackedVector2Array()
@@ -373,6 +375,7 @@ func _merge_binding_pair(first: Piece, second: Piece) -> Piece:
 		keep.add_child(collider)
 	keep.mass = sum_mass
 	# Welding does not transfer an unspent ability to the whole compound.
+	keep.bound_visual = true
 	keep.binding = false
 	remove.binding = false
 	if not keep.anchored:
