@@ -1,5 +1,5 @@
 extends Node2D
-## Scene-only drawing: space backdrop, drifting stars, planet, platform, target line and countdown.
+## Scene visuals: space, stars, planet, platform, target line, timer and meteor shower.
 
 const SPACE := Color("#030509")
 const LINE := Color("#f0f3f8")
@@ -13,10 +13,16 @@ var target_y := -150.0
 var countdown := -1.0
 var stars: Array[Vector4] = [] # normalized x/y, speed, radius
 var star_phase := 0.0
+var meteor_event_active := false
+var meteor_direction := 1
+var meteor_elapsed := 0.0
+var meteors: Array[Vector4] = [] # normalized x/y, fall speed, streak length
 
 func _ready() -> void:
 	for i in 190:
 		stars.append(Vector4(randf(), randf(), randf_range(2.0, 13.0), randf_range(0.35, 1.15)))
+	for i in 26:
+		meteors.append(Vector4(randf(), randf(), randf_range(110.0, 230.0), randf_range(10.0, 24.0)))
 	queue_redraw()
 
 func set_scene_state(view_size: Vector2, cam_position: Vector2, stand_width: float, ground_y: float, finish_y: float) -> void:
@@ -31,20 +37,30 @@ func set_countdown(seconds_left: float) -> void:
 	countdown = seconds_left
 	queue_redraw()
 
+func set_meteor_event(enabled: bool, direction: int) -> void:
+	if enabled and not meteor_event_active:
+		meteor_elapsed = 0.0
+	meteor_event_active = enabled
+	meteor_direction = -1 if direction < 0 else 1
+	queue_redraw()
+
 func _process(dt: float) -> void:
 	star_phase += dt
+	if meteor_event_active:
+		meteor_elapsed += dt
 	queue_redraw()
 
 func _draw() -> void:
 	if viewport_size.x <= 0.0 or viewport_size.y <= 0.0:
 		return
 	var origin := camera_position - viewport_size * 0.5
-	# Near-black space with two very soft monochrome nebula forms.
 	draw_rect(Rect2(origin, viewport_size), SPACE)
 	draw_circle(origin + Vector2(viewport_size.x * 0.86, viewport_size.y * 0.22), viewport_size.x * 0.33, Color("#080c13"))
 	draw_circle(origin + Vector2(viewport_size.x * 0.10, viewport_size.y * 0.73), viewport_size.x * 0.27, Color("#070a10"))
 	_draw_distant_world(origin)
 	_draw_stars(origin)
+	if meteor_event_active:
+		_draw_meteor_shower(origin)
 	_draw_target_line()
 	_draw_platform()
 	_draw_countdown()
@@ -59,6 +75,21 @@ func _draw_stars(origin: Vector2) -> void:
 		draw_circle(p, star.w, Color(0.87, 0.91, 0.98, shimmer))
 		if star.w > 1.02:
 			draw_line(p - Vector2(2.4, 0.0), p + Vector2(2.4, 0.0), Color(0.87, 0.91, 0.98, shimmer * 0.35), 0.65, true)
+
+func _draw_meteor_shower(origin: Vector2) -> void:
+	# These streaks exist only during the event; all positions wrap in screen space.
+	for i in meteors.size():
+		var meteor := meteors[i]
+		var speed: float = meteor.z
+		var x := fposmod(meteor.x * viewport_size.x + meteor_direction * meteor_elapsed * speed * 0.38, viewport_size.x)
+		var y := fposmod(meteor.y * viewport_size.y + meteor_elapsed * speed, viewport_size.y)
+		var head := origin + Vector2(x, y)
+		var tail := head + Vector2(-meteor_direction * meteor.w * 0.55, -meteor.w)
+		var glow := Color(0.83, 0.89, 0.98, 0.22)
+		var core := Color(0.95, 0.97, 1.0, 0.72)
+		draw_line(tail, head, glow, 3.0, true)
+		draw_line(tail, head, core, 1.0, true)
+		draw_circle(head, 1.4, Color(0.98, 0.99, 1.0, 0.9))
 
 func _draw_distant_world(origin: Vector2) -> void:
 	var center := origin + Vector2(viewport_size.x * 0.82, viewport_size.y * 0.34)
@@ -80,9 +111,7 @@ func _draw_target_line() -> void:
 	var x0 := camera_position.x - half_view + 18.0
 	var x1 := camera_position.x + half_view - 18.0
 	var y := target_y
-	# The broad faint under-stroke makes the goal visible against both stars and nebula.
 	draw_line(Vector2(x0, y), Vector2(x1, y), Color(0.91, 0.94, 1.0, 0.15), 5.0, true)
-	# Broken luminous line, with bright end caps; this is the final-height guide.
 	draw_dashed_line(Vector2(x0, y), Vector2(x1, y), Color(0.91, 0.94, 1.0, 0.88), 1.6, 10.0, true, true)
 	for x in [x0, x1]:
 		draw_line(Vector2(x, y - 7.0), Vector2(x, y + 7.0), Color(0.91, 0.94, 1.0, 0.92), 1.2, true)
@@ -94,19 +123,14 @@ func _draw_countdown() -> void:
 	var font := ThemeDB.fallback_font
 	var font_size := 30
 	var text_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
-
-	# Place the readout 2.5 block-heights above the target line.
 	var center := Vector2(camera_position.x, target_y - CELL * 2.5)
 	var panel_size := Vector2(text_size.x + 38.0, 48.0)
 	var panel := Rect2(center - panel_size * 0.5, panel_size)
 	var text_position := Vector2(center.x - text_size.x * 0.5, center.y + text_size.y * 0.35)
-
-	# Compact instrument-style readout: dark capsule, fine outline and clipped corner accents.
 	draw_rect(panel, Color("#05070b"))
 	draw_rect(panel, Color(0.78, 0.84, 0.94, 0.76), false, 1.0, true)
 	var corner := 7.0
 	var accent := Color("#f0f3f8")
-	# Four short corner marks give the timer a distinct, precise visual treatment.
 	draw_line(panel.position, panel.position + Vector2(corner, 0.0), accent, 1.4, true)
 	draw_line(panel.position, panel.position + Vector2(0.0, corner), accent, 1.4, true)
 	draw_line(Vector2(panel.end.x, panel.position.y), Vector2(panel.end.x - corner, panel.position.y), accent, 1.4, true)
@@ -115,8 +139,6 @@ func _draw_countdown() -> void:
 	draw_line(Vector2(panel.position.x, panel.end.y), Vector2(panel.position.x, panel.end.y - corner), accent, 1.4, true)
 	draw_line(panel.end, panel.end - Vector2(corner, 0.0), accent, 1.4, true)
 	draw_line(panel.end, panel.end - Vector2(0.0, corner), accent, 1.4, true)
-
-	# Subtle glow behind crisp white numerals.
 	var glow := Color(0.86, 0.91, 1.0, 0.16)
 	for offset in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
 		draw_string(font, text_position + offset, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, glow)

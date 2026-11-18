@@ -6,9 +6,9 @@ const CELL := 27.0
 const TILE_INSET := 1.35
 const TILE_BORDER := TILE_INSET
 const TILE_SIZE := CELL
+# Tune this value to change how strongly the meteor-shower gust pushes blocks.
+const WIND_ACCELERATION := 50.0 # world pixels/s^2
 
-# Every cell coordinate is an integer multiple of CELL.
-# Even-sized pieces use a consistent local anchor instead of fractional Vector2 coordinates.
 const SHAPES := [
 	[Vector2(-1, 0), Vector2(0, 0), Vector2(1, 0), Vector2(2, 0)],
 	[Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)],
@@ -77,7 +77,6 @@ class Piece extends RigidBody2D:
 			result.emit(cmd, true)
 
 	func _draw() -> void:
-		# The black outer square is exactly CELL x CELL, matching its collider.
 		var half := CELL * 0.5
 		for cell: Vector2 in cells:
 			var center := cell * CELL
@@ -96,6 +95,7 @@ var spawning_enabled := true
 var buffered := 99
 var buffered_at := -1000
 var platform_y := 300.0
+var wind_direction := 0
 
 signal block_result(cmd: int, moved: bool)
 
@@ -114,6 +114,9 @@ func set_camera_y(value: float) -> void:
 
 func set_spawning_enabled(value: bool) -> void:
 	spawning_enabled = value
+
+func set_wind_direction(direction: int) -> void:
+	wind_direction = clampi(direction, -1, 1)
 
 func active_instance_id() -> int:
 	return active.get_instance_id() if is_instance_valid(active) else 0
@@ -140,7 +143,7 @@ func _spawn() -> void:
 	var body := Piece.new()
 	body.cells = SHAPES[shape_index]
 	body.result.connect(_on_piece_result)
-	body.gravity_scale = 0.32
+	body.gravity_scale = 0.50
 	body.linear_damp = 1.4
 	body.angular_damp = 2.2
 	body.contact_monitor = true
@@ -171,12 +174,18 @@ func _on_piece_result(cmd: int, moved: bool) -> void:
 func _physics_process(dt: float) -> void:
 	for i in range(pieces.size() - 1, -1, -1):
 		var body := pieces[i]
-		if body.position.y > platform_y + viewport_size.y * 2.0:
+		if body.position.y > platform_y + viewport_size.y * 0.35:
 			if body == active:
 				active = null
 				spawn_wait = 0.35
 			pieces.remove_at(i)
 			body.queue_free()
+
+		# Constant low acceleration affects every existing block, active or settled.
+		# Change WIND_ACCELERATION above to tune the strength of the gust.
+		if wind_direction != 0 and is_instance_valid(body):
+			body.apply_central_force(Vector2(wind_direction * WIND_ACCELERATION * body.mass, 0.0))
+
 	if is_instance_valid(active):
 		contact_time = contact_time + dt if active.get_contact_count() > 0 else 0.0
 		if contact_time >= 0.24:

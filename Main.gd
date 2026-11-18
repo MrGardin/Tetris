@@ -1,13 +1,10 @@
 extends Node2D
 ## Godot 4.5.x. Game-level input, camera, platform physics and victory countdown.
-## Block spawning, physics, commands and block rendering are handled by child "Blocks".
-## Scene decoration and countdown text are handled by child "Visual".
+## Child nodes: Visual (scene graphics), Blocks (block simulation), Events (timed events).
 
 const PLATFORM_Y := 300.0
 const TARGET_Y := PLATFORM_Y - 450.0
 const SWIPE_FRACTION := 0.014
-const WIN_COUNTDOWN := 3.0
-
 const NO_POINTER := -2
 const MOUSE_POINTER := -1
 
@@ -16,9 +13,10 @@ var stand_shape := RectangleShape2D.new()
 var screen_size := Vector2(540.0, 960.0)
 var blocks: Node
 var visual: Node
+var events: Node
 var sheet := preload("res://Sheet.gd").new()
 
-var countdown := -1.0 # -1 means inactive; otherwise seconds remaining.
+var countdown := -1.0
 var won := false
 var pointer := NO_POINTER
 var start := Vector2.ZERO
@@ -33,7 +31,10 @@ func _ready() -> void:
 	Input.use_accumulated_input = false
 	blocks = get_node("Blocks")
 	visual = get_node("Visual")
+	events = get_node("Events")
 	blocks.connect("block_result", _on_block_result)
+	events.connect("meteor_event_started", _on_meteor_event_started)
+	events.connect("meteor_event_ended", _on_meteor_event_ended)
 
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -43,7 +44,6 @@ func _ready() -> void:
 
 	add_child(camera)
 	camera.make_current()
-
 	var stand := StaticBody2D.new()
 	stand.position.y = PLATFORM_Y + 2.25
 	var collision := CollisionShape2D.new()
@@ -67,6 +67,14 @@ func _update_visual() -> void:
 	if is_instance_valid(visual):
 		visual.call("set_scene_state", screen_size, camera.position, stand_shape.size.x, PLATFORM_Y, TARGET_Y)
 		visual.call("set_countdown", countdown if countdown >= 0.0 and not won else -1.0)
+
+func _on_meteor_event_started(direction: int) -> void:
+	blocks.call("set_wind_direction", direction)
+	visual.call("set_meteor_event", true, direction)
+
+func _on_meteor_event_ended() -> void:
+	blocks.call("set_wind_direction", 0)
+	visual.call("set_meteor_event", false, 0)
 
 func _input(e: InputEvent) -> void:
 	if won:
@@ -164,14 +172,14 @@ func _physics_process(dt: float) -> void:
 		blocks.call("set_spawning_enabled", false)
 	elif top <= TARGET_Y:
 		if countdown < 0.0:
-			countdown = WIN_COUNTDOWN
+			countdown = 3.0
 		countdown = maxf(0.0, countdown - dt)
 		blocks.call("set_spawning_enabled", false)
 		if countdown <= 0.0:
 			won = true
 			sheet.set_finished(true)
+			events.call("stop_events")
 	else:
-		# If the tower drops back below the target, cancel the attempt and resume play.
 		countdown = -1.0
 		blocks.call("set_spawning_enabled", true)
 

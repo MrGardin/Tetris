@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://dlcmj5byvkck1"]
+[gd_scene load_steps=5 format=3 uid="uid://dlcmj5byvkck1"]
 
 [ext_resource type="Script" uid="uid://bfampg272muqb" path="res://Main.gd" id="1"]
 [ext_resource type="Script" uid="uid://1r0wr7mce147" path="res://visual.gd" id="2_uu6xs"]
 [ext_resource type="Script" uid="uid://ck0vf1isbtvti" path="res://blocks.gd" id="3_r0du0"]
+[ext_resource type="Script" uid="uid://ddu58traciahe" path="res://event.gd" id="4_cm0pq"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -12,3 +13,6 @@ script = ExtResource("2_uu6xs")
 
 [node name="Blocks" type="Node2D" parent="."]
 script = ExtResource("3_r0du0")
+
+[node name="Events" type="Node2D" parent="."]
+script = ExtResource("4_cm0pq")
