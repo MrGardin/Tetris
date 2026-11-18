@@ -8,6 +8,8 @@ const NO_POINTER := -2
 const MOUSE_POINTER := -1
 const PROGRESS_SEND_INTERVAL := 0.25
 const PROOF_MAX_DIMENSION := 360
+const HERO_SELECT_SCENE_PATH := "res://scenes/HeroSelect/HeroSelect.tscn"
+const ABILITY_COOLDOWN := 30.0
 const MAIN_MENU_SCENE_PATH := "res://scenes/Start/Start.tscn"
 
 var camera := Camera2D.new()
@@ -35,6 +37,9 @@ var drag_px := Vector2.ZERO
 var swipe_px := 10.0
 var feedback_time := 0.0
 
+var hero_id := ""
+var ability_remaining := 0.0
+
 var result_layer: CanvasLayer
 var result_root: Control
 var result_panel: Panel
@@ -46,6 +51,13 @@ var menu_button: Button
 
 func _ready() -> void:
 	Input.use_accumulated_input = false
+	var local_net := get_node_or_null("/root/Net") as LanClient
+	if local_net == null or not local_net.hero_locked:
+		set_physics_process(false)
+		set_process_input(false)
+		get_tree().call_deferred("change_scene_to_file", HERO_SELECT_SCENE_PATH)
+		return
+	hero_id = local_net.selected_hero
 
 	blocks = get_node("Blocks")
 	visual = get_node("Visual")
@@ -224,6 +236,12 @@ func _begin(id: int, pos: Vector2) -> void:
 		minf(get_window().size.x, get_window().size.y) * SWIPE_FRACTION
 	)
 
+	if sheet.ability_hit(pos):
+		consumed = true
+		last_up = -10000
+		_activate_ability()
+		return
+
 	var button: int = sheet.hit(pos)
 	consumed = button >= 0
 
@@ -276,6 +294,9 @@ func _on_block_result(command: int, moved: bool) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not match_finished and not won:
+		ability_remaining = maxf(0.0, ability_remaining - delta)
+	_update_ability_ui()
 	if feedback_time > 0.0:
 		feedback_time -= delta
 		if feedback_time <= 0.0:
@@ -304,6 +325,7 @@ func _physics_process(delta: float) -> void:
 			if multiplayer_active and network != null:
 				network.send_goal_reached()
 			else:
+				match_finished = true
 				proof_label.text = "Одиночная игра"
 				_show_result_panel("ПОБЕДА")
 
@@ -366,7 +388,8 @@ func _on_match_result(result: String, message: String) -> void:
 		won = false
 
 	# Дожидаемся отрисовки финального игрового кадра перед снимком.
-	await get_tree().process_frame
+	visual.set_countdown(-1.0)
+	await RenderingServer.frame_post_draw
 	_send_local_proof()
 	_show_result_panel(message)
 
@@ -601,6 +624,8 @@ func _layout_result_ui() -> void:
 
 
 func _show_result_panel(message: String) -> void:
+	pointer = NO_POINTER
+	_update_ability_ui()
 	result_label.text = message
 	result_root.visible = true
 	_layout_result_ui()
@@ -622,3 +647,22 @@ func _on_main_menu_pressed() -> void:
 		push_error(
 			"Не удалось открыть главное меню. Код ошибки: %s" % error
 		)
+
+
+func _activate_ability() -> void:
+	if match_finished or won or countdown >= 0.0 or ability_remaining > 0.0:
+		return
+	if bool(blocks.activate_hero_ability(hero_id)):
+		ability_remaining = ABILITY_COOLDOWN
+		_update_ability_ui()
+
+
+func _update_ability_ui() -> void:
+	if not is_instance_valid(blocks):
+		return
+	var available: bool = (
+		not match_finished and not won and countdown < 0.0
+		and ability_remaining <= 0.0
+		and bool(blocks.can_activate_hero_ability())
+	)
+	sheet.set_ability_state(hero_id, ability_remaining, ABILITY_COOLDOWN, available)

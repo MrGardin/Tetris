@@ -87,6 +87,10 @@ var searching: bool = false
 
 
 func _ready() -> void:
+	var local_net := get_node_or_null("/root/Net") as LanClient
+	if local_net == null or not local_net.hero_locked:
+		get_tree().call_deferred("change_scene_to_file", "res://scenes/HeroSelect/HeroSelect.tscn")
+		return
 	randomize()
 	viewport_size = get_viewport_rect().size
 
@@ -520,7 +524,7 @@ func _create_card(
 
 func _build_back_button() -> void:
 	back_button = Button.new()
-	back_button.text = "НАЗАД В МЕНЮ"
+	back_button.text = "НАЗАД К ГЕРОЯМ"
 	back_button.focus_mode = Control.FOCUS_ALL
 	back_button.add_theme_font_size_override("font_size", 12)
 	back_button.add_theme_color_override("font_color", WHITE)
@@ -531,7 +535,7 @@ func _build_back_button() -> void:
 	back_button.add_theme_stylebox_override("pressed", _make_small_style(true))
 	back_button.add_theme_stylebox_override("focus", _make_small_style(true))
 	back_button.pressed.connect(func() -> void:
-		_change_scene(start_scene_path)
+		_change_scene("res://scenes/HeroSelect/HeroSelect.tscn")
 	)
 	canvas_root.add_child(back_button)
 

@@ -16,6 +16,28 @@ signal opponent_proof_received(image_base64: String)
 
 const SERVER_URL: String = "wss://applicant-differently-resolutions-recommends.trycloudflare.com"
 
+# Local hero state. Never included in server packets.
+const HERO_BINDER := "binder"
+const HERO_LEVITATOR := "levitator"
+var selected_hero: String = ""
+var hero_locked: bool = false
+
+func begin_hero_selection() -> void:
+	selected_hero = ""
+	hero_locked = false
+
+func select_hero(hero: String) -> bool:
+	if hero_locked or hero not in [HERO_BINDER, HERO_LEVITATOR]:
+		return false
+	selected_hero = hero
+	return true
+
+func confirm_hero() -> bool:
+	if selected_hero not in [HERO_BINDER, HERO_LEVITATOR]:
+		return false
+	hero_locked = true
+	return true
+
 var room_code: String = ""
 var player_role: String = ""
 var match_ready: bool = false

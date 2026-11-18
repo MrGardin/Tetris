@@ -6,7 +6,7 @@ extends Node2D
 var start_scene_path: String = "res://scenes/Start/Start.tscn"
 
 @export_file("*.tscn")
-var multiplayer_menu_scene_path: String = "res://scenes/MultiplayerMenu/MultiplayerMenu.tscn"
+var hero_select_scene_path: String = "res://scenes/HeroSelect/HeroSelect.tscn"
 
 const SPACE := Color("#030509")
 const WHITE := Color("#f0f3f8")
@@ -517,7 +517,7 @@ func _on_back_pressed() -> void:
 
 
 func _on_play_pressed() -> void:
-	_change_scene(multiplayer_menu_scene_path)
+	_change_scene(hero_select_scene_path)
 
 
 func _change_scene(path: String) -> void:
