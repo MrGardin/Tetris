@@ -1,6 +1,6 @@
 extends Node
 class_name LanClient
-## Сетевой клиент. Добавь в Autoload с именем Net.
+## Сетевой клиент. Добавить в Autoload с именем Net.
 
 signal status_changed(text: String)
 signal room_created(room_code: String)
@@ -9,8 +9,12 @@ signal match_started
 signal opponent_left
 signal opponent_progress_received(value: float)
 signal match_result_received(result: String, message: String)
+signal network_event_started(event_name: String, direction: int, warning_duration: float)
+signal network_event_execute
+signal network_event_ended
+signal opponent_proof_received(image_base64: String)
 
-const SERVER_URL: String = "wss://areas-momentum-alpine-figured.trycloudflare.com"
+const SERVER_URL: String = "wss://ref-necessary-gulf-affected.trycloudflare.com"
 
 var room_code: String = ""
 var player_role: String = ""
@@ -34,7 +38,6 @@ func _process(_delta: float) -> void:
 			status_changed.emit("Подключено к серверу.")
 
 		while not _pending_messages.is_empty():
-			# pop_front() возвращает Variant, поэтому тип задаём явно.
 			var data: Dictionary = _pending_messages.pop_front()
 			_send_now(data)
 
@@ -80,8 +83,11 @@ func send_goal_reached() -> void:
 	_send_or_queue({"type": "goal_reached"})
 
 
-func send_game_over() -> void:
-	_send_or_queue({"type": "game_over"})
+func send_tower_proof(image_base64: String) -> void:
+	_send_or_queue({
+		"type": "tower_proof",
+		"image": image_base64
+	})
 
 
 func close_connection() -> void:
@@ -116,7 +122,7 @@ func _send_or_queue(data: Dictionary) -> void:
 	var error: Error = _socket.connect_to_url(SERVER_URL)
 	if error != OK:
 		_pending_messages.clear()
-		status_changed.emit("Не удалось подключиться. Код ошибки: %s" % error)
+		status_changed.emit("Не удалось подключиться. Код: %s" % error)
 		return
 
 	status_changed.emit("Подключаемся к серверу...")
@@ -140,8 +146,9 @@ func _handle_message(raw_text: String) -> void:
 		return
 
 	var data: Dictionary = parsed
+	var message_type: String = str(data.get("type", ""))
 
-	match str(data.get("type", "")):
+	match message_type:
 		"searching":
 			status_changed.emit("Ищем случайного соперника...")
 
@@ -170,11 +177,27 @@ func _handle_message(raw_text: String) -> void:
 				clampf(float(data.get("progress", 0.0)), 0.0, 1.0)
 			)
 
+		"event_start":
+			network_event_started.emit(
+				str(data.get("event", "")),
+				int(data.get("direction", 1)),
+				float(data.get("warning_duration", 2.2))
+			)
+
+		"event_execute":
+			network_event_execute.emit()
+
+		"event_end":
+			network_event_ended.emit()
+
 		"match_result":
 			var result: String = str(data.get("result", ""))
 			var message: String = str(data.get("message", "Матч завершён."))
 			match_result_received.emit(result, message)
 			status_changed.emit(message)
+
+		"tower_proof":
+			opponent_proof_received.emit(str(data.get("image", "")))
 
 		"opponent_left":
 			match_ready = false

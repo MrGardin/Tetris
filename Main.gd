@@ -1,5 +1,5 @@
 extends Node2D
-## Игровой цикл, локальная физика и сетевой прогресс соперника.
+## Локальная физика, сетевые события и обмен снимками после матча.
 
 const PLATFORM_Y := 300.0
 const TARGET_Y := PLATFORM_Y - 450.0
@@ -7,6 +7,8 @@ const SWIPE_FRACTION := 0.014
 const NO_POINTER := -2
 const MOUSE_POINTER := -1
 const PROGRESS_SEND_INTERVAL := 0.25
+const PROOF_MAX_DIMENSION := 360
+const MAIN_MENU_SCENE_PATH := "res://scenes/Start/Start.tscn"
 
 var camera := Camera2D.new()
 var stand_shape := RectangleShape2D.new()
@@ -33,6 +35,14 @@ var drag_px := Vector2.ZERO
 var swipe_px := 10.0
 var feedback_time := 0.0
 
+var result_layer: CanvasLayer
+var result_root: Control
+var result_panel: PanelContainer
+var result_label: Label
+var proof_label: Label
+var proof_texture: TextureRect
+var menu_button: Button
+
 
 func _ready() -> void:
 	Input.use_accumulated_input = false
@@ -52,9 +62,16 @@ func _ready() -> void:
 	multiplayer_active = network != null and network.match_ready
 
 	if multiplayer_active:
+		events.set_network_mode(true)
 		network.opponent_progress_received.connect(_on_opponent_progress)
 		network.match_result_received.connect(_on_match_result)
 		network.opponent_left.connect(_on_opponent_left)
+		network.network_event_started.connect(_on_network_event_started)
+		network.network_event_execute.connect(_on_network_event_execute)
+		network.network_event_ended.connect(_on_network_event_ended)
+		network.opponent_proof_received.connect(_on_opponent_proof_received)
+
+	_build_result_ui()
 
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -85,6 +102,7 @@ func _resize() -> void:
 	if is_instance_valid(blocks):
 		blocks.set_viewport_size(screen_size)
 
+	_layout_result_ui()
 	_update_visual()
 	sheet.queue_redraw()
 
@@ -126,13 +144,32 @@ func _on_purge_event_ended() -> void:
 	visual.set_purge_event(false)
 
 
+func _on_network_event_started(
+	event_name: String,
+	direction: int,
+	warning_duration: float
+) -> void:
+	events.begin_network_event(event_name, direction, warning_duration)
+
+
+func _on_network_event_execute() -> void:
+	events.execute_network_event()
+
+
+func _on_network_event_ended() -> void:
+	events.end_network_event()
+
+
 func _input(event: InputEvent) -> void:
 	if match_finished:
 		return
 
 	if won:
 		if not multiplayer_active:
-			if (event is InputEventScreenTouch or event is InputEventMouseButton) and event.is_pressed():
+			if (
+				event is InputEventScreenTouch
+				or event is InputEventMouseButton
+			) and event.is_pressed():
 				get_tree().call_deferred("reload_current_scene")
 		return
 
@@ -249,7 +286,6 @@ func _physics_process(delta: float) -> void:
 			sheet.set_selected(-1)
 
 	if match_finished:
-		_update_visual()
 		return
 
 	var top: float = float(blocks.top_y(PLATFORM_Y))
@@ -274,6 +310,7 @@ func _physics_process(delta: float) -> void:
 				network.send_goal_reached()
 			else:
 				visual.set_match_result("ПОБЕДА")
+				_show_result_panel("ПОБЕДА")
 
 	else:
 		countdown = -1.0
@@ -315,6 +352,9 @@ func _on_opponent_progress(value: float) -> void:
 
 
 func _on_match_result(result: String, message: String) -> void:
+	if match_finished:
+		return
+
 	match_finished = true
 	blocks.set_spawning_enabled(false)
 	events.stop_events()
@@ -322,12 +362,170 @@ func _on_match_result(result: String, message: String) -> void:
 	if result == "win":
 		won = true
 		sheet.set_finished(true)
-	elif result == "loss":
-		won = false
 
 	visual.set_match_result(message)
 
+	# Даём кадру с итоговой башней отрисоваться до захвата изображения.
+	await get_tree().process_frame
+	_send_local_proof()
+	_show_result_panel(message)
+
 
 func _on_opponent_left() -> void:
-	if is_instance_valid(visual):
-		visual.set_match_result("СОПЕРНИК ОТКЛЮЧИЛСЯ")
+	if match_finished:
+		return
+
+	match_finished = true
+	blocks.set_spawning_enabled(false)
+	events.stop_events()
+	visual.set_match_result("СОПЕРНИК ОТКЛЮЧИЛСЯ")
+	_show_result_panel("СОПЕРНИК ОТКЛЮЧИЛСЯ")
+
+
+func _send_local_proof() -> void:
+	if network == null or not multiplayer_active:
+		return
+
+	var image: Image = get_viewport().get_texture().get_image()
+	if image == null or image.is_empty():
+		proof_label.text = "Не удалось снять экран."
+		return
+
+	var largest_side: int = maxi(image.get_width(), image.get_height())
+	if largest_side > PROOF_MAX_DIMENSION:
+		var scale: float = float(PROOF_MAX_DIMENSION) / float(largest_side)
+		var new_width: int = maxi(1, int(round(float(image.get_width()) * scale)))
+		var new_height: int = maxi(1, int(round(float(image.get_height()) * scale)))
+		image.resize(new_width, new_height, Image.INTERPOLATE_LANCZOS)
+
+	image.convert(Image.FORMAT_RGB8)
+	var jpg_data: PackedByteArray = image.save_jpg_to_buffer(0.48)
+
+	if jpg_data.is_empty():
+		proof_label.text = "Не удалось сжать снимок."
+		return
+
+	network.send_tower_proof(Marshalls.raw_to_base64(jpg_data))
+
+
+func _on_opponent_proof_received(image_base64: String) -> void:
+	if image_base64.is_empty():
+		proof_label.text = "Соперник не прислал снимок."
+		return
+
+	var jpg_data: PackedByteArray = Marshalls.base64_to_raw(image_base64)
+	var image := Image.new()
+	var error: Error = image.load_jpg_from_buffer(jpg_data)
+
+	if error != OK:
+		proof_label.text = "Снимок соперника повреждён."
+		return
+
+	proof_texture.texture = ImageTexture.create_from_image(image)
+	proof_label.text = "Снимок башни соперника"
+
+
+func _build_result_ui() -> void:
+	result_layer = CanvasLayer.new()
+	result_layer.layer = 20
+	add_child(result_layer)
+
+	result_root = Control.new()
+	result_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	result_root.visible = false
+	result_layer.add_child(result_root)
+
+	var shade := ColorRect.new()
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.color = Color(0.0, 0.0, 0.0, 0.78)
+	result_root.add_child(shade)
+
+	result_panel = PanelContainer.new()
+	result_panel.add_theme_stylebox_override("panel", _make_result_panel_style())
+	result_root.add_child(result_panel)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+	result_panel.add_child(column)
+
+	result_label = Label.new()
+	result_label.text = "МАТЧ ЗАВЕРШЁН"
+	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	result_label.add_theme_font_size_override("font_size", 18)
+	result_label.add_theme_color_override("font_color", Color("#f0f3f8"))
+	column.add_child(result_label)
+
+	proof_label = Label.new()
+	proof_label.text = "Ожидаем снимок соперника..."
+	proof_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	proof_label.add_theme_font_size_override("font_size", 11)
+	proof_label.add_theme_color_override("font_color", Color("#a6b0c0"))
+	column.add_child(proof_label)
+
+	proof_texture = TextureRect.new()
+	proof_texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	proof_texture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	column.add_child(proof_texture)
+
+	menu_button = Button.new()
+	menu_button.text = "ГЛАВНОЕ МЕНЮ"
+	menu_button.custom_minimum_size.y = 44.0
+	menu_button.add_theme_font_size_override("font_size", 13)
+	menu_button.pressed.connect(_on_main_menu_pressed)
+	column.add_child(menu_button)
+
+	_layout_result_ui()
+
+
+func _make_result_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#080d15")
+	style.border_color = Color(0.72, 0.80, 0.92, 0.85)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(8)
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 12.0
+	style.content_margin_bottom = 12.0
+	return style
+
+
+func _layout_result_ui() -> void:
+	if not is_instance_valid(result_panel):
+		return
+
+	var panel_width: float = minf(340.0, screen_size.x - 28.0)
+	var panel_height: float = minf(600.0, screen_size.y - 40.0)
+	var image_height: float = maxf(100.0, panel_height - 170.0)
+
+	result_panel.position = Vector2(
+		(screen_size.x - panel_width) * 0.5,
+		(screen_size.y - panel_height) * 0.5
+	)
+	result_panel.size = Vector2(panel_width, panel_height)
+	proof_texture.custom_minimum_size = Vector2(panel_width - 28.0, image_height)
+
+
+func _show_result_panel(message: String) -> void:
+	result_label.text = message
+	result_root.visible = true
+	_layout_result_ui()
+
+
+func _on_main_menu_pressed() -> void:
+	if network != null:
+		network.close_connection()
+
+	if not ResourceLoader.exists(MAIN_MENU_SCENE_PATH):
+		push_error(
+			"Не найдена сцена главного меню: %s. Исправь MAIN_MENU_SCENE_PATH в Main.gd."
+			% MAIN_MENU_SCENE_PATH
+		)
+		return
+
+	var error: Error = get_tree().change_scene_to_file(MAIN_MENU_SCENE_PATH)
+	if error != OK:
+		push_error(
+			"Не удалось открыть главное меню. Код ошибки: %s" % error
+		)
