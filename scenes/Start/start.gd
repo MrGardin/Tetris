@@ -4,6 +4,9 @@ extends Node2D
 @export_file("*.tscn")
 var main_scene_path: String = "res://Main.tscn"
 
+@export_file("*.tscn")
+var how_to_scene_path: String = "res://scenes/HowToPlay/HowToPlay.tscn"
+
 const SPACE := Color("#030509")
 const WHITE := Color("#f0f3f8")
 const MUTED := Color("#a6b0c0")
@@ -12,27 +15,31 @@ const RED := Color("#ff4055")
 var viewport_size := Vector2(540.0, 960.0)
 var elapsed := 0.0
 
-# x, y — нормализованные координаты; z — размер; w — фаза мерцания.
+# x, y — начальная позиция; z — размер; w — фаза мерцания.
 var stars: Array[Vector4] = []
+var star_speeds: Array[Vector2] = []
 
 var overlay: Control
 var title_label: Label
 var subtitle_label: Label
 var play_button: Button
 var how_to_button: Button
-var placeholder_dialog: AcceptDialog
 
 
 func _ready() -> void:
 	randomize()
 	viewport_size = get_viewport_rect().size
 
-	for i in 180:
+	for i in 190:
 		stars.append(Vector4(
 			randf(),
 			randf(),
-			randf_range(0.7, 2.0),
+			randf_range(0.7, 1.9),
 			randf_range(0.0, TAU)
+		))
+		star_speeds.append(Vector2(
+			randf_range(-5.0, 5.0),
+			randf_range(3.0, 15.0)
 		))
 
 	_build_interface()
@@ -54,6 +61,7 @@ func _draw() -> void:
 	_draw_space_background()
 	_draw_planets()
 	_draw_stars()
+	_draw_shooting_stars()
 	_draw_floating_tetrominoes()
 	_draw_logo()
 
@@ -61,7 +69,6 @@ func _draw() -> void:
 func _draw_space_background() -> void:
 	draw_rect(Rect2(Vector2.ZERO, viewport_size), SPACE)
 
-	# Едва заметные цветные области для глубины фона.
 	draw_circle(
 		Vector2(viewport_size.x * 0.08, viewport_size.y * 0.45),
 		viewport_size.x * 0.30,
@@ -76,7 +83,7 @@ func _draw_space_background() -> void:
 
 func _draw_planets() -> void:
 	var distant_center := Vector2(viewport_size.x * 0.83, viewport_size.y * 0.19)
-	var distant_radius := viewport_size.x * 0.115
+	var distant_radius := minf(viewport_size.x * 0.115, 62.0)
 
 	_draw_ellipse(
 		distant_center,
@@ -102,7 +109,6 @@ func _draw_planets() -> void:
 		true
 	)
 
-	# Маленький красный объект — отсылка к эффектам событий в игре.
 	var red_center := Vector2(viewport_size.x * 0.12, viewport_size.y * 0.73)
 	var pulse := 0.85 + 0.15 * sin(elapsed * 1.4)
 	var red_radius := viewport_size.x * 0.043 * pulse
@@ -129,30 +135,56 @@ func _draw_planets() -> void:
 func _draw_stars() -> void:
 	for i in stars.size():
 		var star := stars[i]
-		var position := Vector2(
-			star.x * viewport_size.x,
-			star.y * viewport_size.y
-		)
-		var shimmer := 0.38 + 0.52 * (
-			0.5 + 0.5 * sin(elapsed * 1.3 + star.w)
-		)
-		var color := Color(0.88, 0.92, 1.0, shimmer)
+		var speed := star_speeds[i]
 
-		draw_circle(position, star.z, color)
+		var x := fposmod(star.x * viewport_size.x + speed.x * elapsed, viewport_size.x)
+		var y := fposmod(star.y * viewport_size.y + speed.y * elapsed, viewport_size.y)
+		var twinkle := 0.5 + 0.5 * sin(elapsed * 2.0 + star.w)
+		var alpha := 0.22 + 0.72 * twinkle
+		var point := Vector2(x, y)
 
-		# Изредка звезда превращается в небольшой блик.
+		# У ярких звёзд появляется мягкий ореол.
+		if star.z > 1.45 and twinkle > 0.74:
+			draw_circle(
+				point,
+				star.z * 3.6,
+				Color(0.56, 0.70, 1.0, 0.04 + twinkle * 0.06)
+			)
+
+		draw_circle(point, star.z, Color(0.88, 0.92, 1.0, alpha))
+
 		if star.z > 1.65:
 			draw_line(
-				position - Vector2(3.0, 0.0),
-				position + Vector2(3.0, 0.0),
-				Color(0.88, 0.92, 1.0, shimmer * 0.4),
+				point - Vector2(3.0, 0.0),
+				point + Vector2(3.0, 0.0),
+				Color(0.88, 0.92, 1.0, alpha * 0.4),
 				0.7,
 				true
 			)
 
 
+func _draw_shooting_stars() -> void:
+	# Несколько метеоров с разными интервалами пролёта.
+	for i in 4:
+		var cycle := fposmod(elapsed + float(i) * 2.1, 9.0)
+		if cycle > 0.85:
+			continue
+
+		var progress := cycle / 0.85
+		var start_x := 0.12 + float(i) * 0.21
+		var start_y := 0.06 + float(i % 2) * 0.26
+		var head := Vector2(
+			fposmod(start_x + progress * 0.65, 1.0) * viewport_size.x,
+			fposmod(start_y + progress * 0.44, 1.0) * viewport_size.y
+		)
+		var tail := head + Vector2(-34.0, -20.0)
+
+		draw_line(tail, head, Color(0.70, 0.81, 1.0, 0.09), 4.0, true)
+		draw_line(tail, head, Color(0.90, 0.95, 1.0, 0.56), 1.2, true)
+		draw_circle(head, 1.5, Color(1.0, 1.0, 1.0, 0.86))
+
+
 func _draw_floating_tetrominoes() -> void:
-	# Полупрозрачные формы по краям экрана — не конкурируют с меню.
 	var cell_size := clampf(viewport_size.x * 0.045, 18.0, 25.0)
 	var drift := sin(elapsed * 0.7) * 7.0
 
@@ -199,7 +231,6 @@ func _draw_logo() -> void:
 	var center := Vector2(viewport_size.x * 0.5, viewport_size.y * 0.255)
 	var cell_size := clampf(viewport_size.x * 0.075, 27.0, 38.0)
 
-	# Кольца-орбиты за знаком.
 	_draw_ellipse(
 		center,
 		Vector2(cell_size * 2.75, cell_size * 0.85),
@@ -213,7 +244,6 @@ func _draw_logo() -> void:
 		1.0
 	)
 
-	# Значок из четырёх клеток, напоминающий тетромино.
 	var cells: Array[Vector2i] = [
 		Vector2i(-1, 0),
 		Vector2i(0, 0),
@@ -228,14 +258,10 @@ func _draw_logo() -> void:
 				- Vector2.ONE * cell_size * 0.5,
 			Vector2.ONE * cell_size
 		)
-		var fill := Color("#e9edf3")
-		if i == 3:
-			fill = RED
-
+		var fill := Color("#e9edf3") if i != 3 else RED
 		draw_rect(rect.grow(1.5), Color("#05070b"))
 		draw_rect(rect.grow(-2.0), fill)
 
-	# Маленькие вращающиеся точки на орбите.
 	for i in 3:
 		var angle := elapsed * 0.65 + TAU * float(i) / 3.0
 		var point := center + Vector2(
@@ -255,12 +281,10 @@ func _draw_ellipse(
 
 	for i in 81:
 		var angle := TAU * float(i) / 80.0
-		points.append(
-			center + Vector2(
-				cos(angle) * radii.x,
-				sin(angle) * radii.y
-			)
-		)
+		points.append(center + Vector2(
+			cos(angle) * radii.x,
+			sin(angle) * radii.y
+		))
 
 	draw_polyline(points, color, width, true)
 
@@ -280,8 +304,10 @@ func _build_interface() -> void:
 	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_label.add_theme_font_size_override("font_size", 34)
 	title_label.add_theme_color_override("font_color", WHITE)
-	title_label.add_theme_color_override("font_shadow_color", Color(0.75, 0.83, 1.0, 0.16))
-	title_label.add_theme_constant_override("shadow_offset_x", 0)
+	title_label.add_theme_color_override(
+		"font_shadow_color",
+		Color(0.75, 0.83, 1.0, 0.16)
+	)
 	title_label.add_theme_constant_override("shadow_offset_y", 2)
 	overlay.add_child(title_label)
 
@@ -300,11 +326,6 @@ func _build_interface() -> void:
 	how_to_button = _create_button("КАК ИГРАТЬ", false)
 	how_to_button.pressed.connect(_on_how_to_pressed)
 	overlay.add_child(how_to_button)
-
-	placeholder_dialog = AcceptDialog.new()
-	placeholder_dialog.title = "Как играть"
-	placeholder_dialog.dialog_text = "Раздел «Как играть» появится позже."
-	overlay.add_child(placeholder_dialog)
 
 
 func _create_button(text: String, primary: bool) -> Button:
@@ -357,8 +378,8 @@ func _create_button(text: String, primary: bool) -> Button:
 		pressed.border_color = RED
 
 		button.add_theme_color_override("font_color", WHITE)
-		button.add_theme_color_override("font_hover_color", Color("#ffffff"))
-		button.add_theme_color_override("font_pressed_color", Color("#ffffff"))
+		button.add_theme_color_override("font_hover_color", WHITE)
+		button.add_theme_color_override("font_pressed_color", WHITE)
 
 	button.add_theme_stylebox_override("normal", normal)
 	button.add_theme_stylebox_override("hover", hover)
@@ -371,33 +392,42 @@ func _create_button(text: String, primary: bool) -> Button:
 func _layout_interface() -> void:
 	viewport_size = get_viewport_rect().size
 
-	var title_width := minf(500.0, viewport_size.x - 28.0)
-	var button_width := minf(310.0, viewport_size.x - 64.0)
-	var center_x := viewport_size.x * 0.5
+	var width := viewport_size.x
+	var height := viewport_size.y
+	var center_x := width * 0.5
+	var title_width := minf(500.0, width - 28.0)
+	var button_width := minf(310.0, width - 64.0)
+
+	# Группа меню располагается ниже середины, с запасом от системных панелей.
+	var safe_top := maxf(48.0, height * 0.06)
+	var safe_bottom := maxf(32.0, height * 0.04)
+	var usable_height := height - safe_top - safe_bottom
+	var group_height := 202.0
+	var group_top := safe_top + (usable_height - group_height) * 0.5
 
 	title_label.position = Vector2(
 		center_x - title_width * 0.5,
-		viewport_size.y * 0.375
+		group_top
 	)
-	title_label.size = Vector2(title_width, 54.0)
+	title_label.size = Vector2(title_width, 52.0)
 
 	subtitle_label.position = Vector2(
 		center_x - title_width * 0.5,
-		viewport_size.y * 0.445
+		group_top + 55.0
 	)
 	subtitle_label.size = Vector2(title_width, 24.0)
 
 	play_button.position = Vector2(
 		center_x - button_width * 0.5,
-		viewport_size.y * 0.535
+		group_top + 94.0
 	)
-	play_button.size = Vector2(button_width, 58.0)
+	play_button.size = Vector2(button_width, 54.0)
 
 	how_to_button.position = Vector2(
 		center_x - button_width * 0.5,
-		viewport_size.y * 0.535 + 72.0
+		group_top + 158.0
 	)
-	how_to_button.size = Vector2(button_width, 54.0)
+	how_to_button.size = Vector2(button_width, 44.0)
 
 
 func _on_viewport_resized() -> void:
@@ -406,26 +436,21 @@ func _on_viewport_resized() -> void:
 
 
 func _on_play_pressed() -> void:
-	if not ResourceLoader.exists(main_scene_path):
-		push_error(
-			"Не найдена сцена Main: %s. "
-			% main_scene_path
-			+ "Проверьте main_scene_path в Start.gd."
-		)
-		return
-
-	var error := get_tree().change_scene_to_file(main_scene_path)
-	if error != OK:
-		push_error("Не удалось открыть сцену Main. Код ошибки: %s" % error)
+	_change_scene(main_scene_path)
 
 
 func _on_how_to_pressed() -> void:
-	var path := "res://scenes/HowToPlay/HowToPlay.tscn"
+	_change_scene(how_to_scene_path)
 
+
+func _change_scene(path: String) -> void:
 	if not ResourceLoader.exists(path):
-		push_error("Не найдена сцена обучения: %s" % path)
+		push_error("Сцена не найдена: %s" % path)
 		return
 
 	var error := get_tree().change_scene_to_file(path)
 	if error != OK:
-		push_error("Не удалось открыть сцену обучения. Код ошибки: %s" % error)
+		push_error(
+			"Не удалось открыть сцену %s. Код ошибки: %s"
+			% [path, error]
+		)
