@@ -1,12 +1,12 @@
 extends Node2D
 ## Экран обучения для Tetris:Windbound.
-## Центрируется между безопасными отступами экрана; при нехватке места прокручивается.
+## Центрируется между безопасными отступами; при нехватке места прокручивается.
 
 @export_file("*.tscn")
-var start_scene_path: String = "res://scenes/MultiplayerMenu/MultiplayerMenu.tscn"
+var start_scene_path: String = "res://scenes/Start/Start.tscn"
 
 @export_file("*.tscn")
-var main_scene_path: String = "res://Main.tscn"
+var multiplayer_menu_scene_path: String = "res://scenes/MultiplayerMenu/MultiplayerMenu.tscn"
 
 const SPACE := Color("#030509")
 const WHITE := Color("#f0f3f8")
@@ -92,8 +92,14 @@ func _draw_planet() -> void:
 	)
 	draw_circle(center, radius, Color("#0b1018"))
 	draw_arc(
-		center, radius, -2.3, 0.8, 48,
-		Color(0.81, 0.86, 0.94, 0.18), 1.0, true
+		center,
+		radius,
+		-2.3,
+		0.8,
+		48,
+		Color(0.81, 0.86, 0.94, 0.18),
+		1.0,
+		true
 	)
 
 
@@ -102,8 +108,14 @@ func _draw_stars() -> void:
 		var star := stars[i]
 		var speed := star_speeds[i]
 
-		var x := fposmod(star.x * viewport_size.x + speed.x * elapsed, viewport_size.x)
-		var y := fposmod(star.y * viewport_size.y + speed.y * elapsed, viewport_size.y)
+		var x := fposmod(
+			star.x * viewport_size.x + speed.x * elapsed,
+			viewport_size.x
+		)
+		var y := fposmod(
+			star.y * viewport_size.y + speed.y * elapsed,
+			viewport_size.y
+		)
 		var twinkle := 0.5 + 0.5 * sin(elapsed * 2.0 + star.w)
 		var alpha := 0.22 + 0.70 * twinkle
 		var point := Vector2(x, y)
@@ -135,8 +147,14 @@ func _draw_shooting_stars() -> void:
 			continue
 
 		var progress := cycle
-		var x := fposmod(float(i) * 0.37 + 0.18 + progress * 0.70, 1.0)
-		var y := fposmod(float(i) * 0.23 + progress * 0.52, 1.0)
+		var x := fposmod(
+			float(i) * 0.37 + 0.18 + progress * 0.70,
+			1.0
+		)
+		var y := fposmod(
+			float(i) * 0.23 + progress * 0.52,
+			1.0
+		)
 		var head := Vector2(x * viewport_size.x, y * viewport_size.y)
 		var tail := head + Vector2(-22.0, -14.0)
 
@@ -263,7 +281,6 @@ func _build_interface() -> void:
 	_add_header()
 	_add_control_cards()
 	_add_objective_card()
-	_add_keyboard_hint()
 	_add_buttons()
 
 
@@ -331,10 +348,7 @@ func _create_control_card(
 	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	icon.add_theme_font_size_override("font_size", 25)
-	icon.add_theme_color_override(
-		"font_color",
-		RED if heading == "ПОВОРОТ" else WHITE
-	)
+	icon.add_theme_color_override("font_color", WHITE)
 	row.add_child(icon)
 
 	var text_column := VBoxContainer.new()
@@ -386,8 +400,7 @@ func _add_objective_card() -> void:
 	var description := Label.new()
 	description.text = (
 		"Дострой башню до верхней пунктирной линии и удерживай её там "
-		+ "5 секунд. В будущем соревновательном режиме победит тот, "
-		+ "кто сделает это раньше соперника."
+		+ "5 секунд. Побеждает тот, кто первым выполнит это условие."
 	)
 	description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -395,36 +408,16 @@ func _add_objective_card() -> void:
 	description.add_theme_color_override("font_color", MUTED)
 	column.add_child(description)
 
-	var note := Label.new()
-	note.text = "Сейчас соперников ещё нет — можно тренироваться в одиночку."
-	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.add_theme_font_size_override("font_size", 11)
-	note.add_theme_color_override("font_color", Color("#ff8995"))
-	column.add_child(note)
-
-
-func _add_keyboard_hint() -> void:
-	var hint := Label.new()
-	hint.text = "Клавиатура: ← / A — влево, ↑ / W — поворот, → / D — вправо."
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hint.custom_minimum_size = Vector2(0.0, 36.0)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 11)
-	hint.add_theme_color_override("font_color", MUTED)
-	content.add_child(hint)
-
 
 func _add_buttons() -> void:
-	var back_button := _create_button("НАЗАД В МЕНЮ", false)
-	back_button.pressed.connect(_on_back_pressed)
-	content.add_child(back_button)
-
+	# Порядок поменян: сначала кнопка игры, затем возврат в меню.
 	var play_button := _create_button("ИГРАТЬ", true)
 	play_button.pressed.connect(_on_play_pressed)
 	content.add_child(play_button)
+
+	var back_button := _create_button("НАЗАД В МЕНЮ", false)
+	back_button.pressed.connect(_on_back_pressed)
+	content.add_child(back_button)
 
 
 func _make_panel_style(is_objective: bool) -> StyleBoxFlat:
@@ -524,7 +517,7 @@ func _on_back_pressed() -> void:
 
 
 func _on_play_pressed() -> void:
-	_change_scene(main_scene_path)
+	_change_scene(multiplayer_menu_scene_path)
 
 
 func _change_scene(path: String) -> void:
@@ -532,7 +525,7 @@ func _change_scene(path: String) -> void:
 		push_error("Сцена не найдена: %s" % path)
 		return
 
-	var error := get_tree().change_scene_to_file(path)
+	var error: Error = get_tree().change_scene_to_file(path)
 	if error != OK:
 		push_error(
 			"Не удалось открыть сцену %s. Код ошибки: %s"
