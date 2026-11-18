@@ -1,5 +1,5 @@
 extends Node2D
-## Scene visuals: space, stars, planet, platform, target line, timer and meteor shower.
+## Scene visuals: space, stars, planet, platform, target line, timer and event effects.
 
 const SPACE := Color("#030509")
 const LINE := Color("#f0f3f8")
@@ -11,12 +11,15 @@ var platform_width := 180.0
 var platform_y := 300.0
 var target_y := -150.0
 var countdown := -1.0
-var stars: Array[Vector4] = [] # normalized x/y, speed, radius
+var stars: Array[Vector4] = []
 var star_phase := 0.0
 var meteor_event_active := false
 var meteor_direction := 1
 var meteor_elapsed := 0.0
-var meteors: Array[Vector4] = [] # normalized x/y, fall speed, streak length
+var meteors: Array[Vector4] = []
+var purge_alpha := 0.0
+var purge_requested := false
+var purge_clock := 0.0
 
 func _ready() -> void:
 	for i in 190:
@@ -44,10 +47,21 @@ func set_meteor_event(enabled: bool, direction: int) -> void:
 	meteor_direction = -1 if direction < 0 else 1
 	queue_redraw()
 
+func set_purge_event(enabled: bool) -> void:
+	purge_requested = enabled
+	if enabled:
+		purge_clock = 0.0
+	queue_redraw()
+
 func _process(dt: float) -> void:
 	star_phase += dt
 	if meteor_event_active:
 		meteor_elapsed += dt
+	if purge_requested:
+		purge_clock += dt
+		purge_alpha = minf(1.0, purge_alpha + dt * 2.0)
+	else:
+		purge_alpha = maxf(0.0, purge_alpha - dt * 1.7)
 	queue_redraw()
 
 func _draw() -> void:
@@ -61,6 +75,8 @@ func _draw() -> void:
 	_draw_stars(origin)
 	if meteor_event_active:
 		_draw_meteor_shower(origin)
+	if purge_alpha > 0.0:
+		_draw_purge_planet(origin)
 	_draw_target_line()
 	_draw_platform()
 	_draw_countdown()
@@ -77,7 +93,6 @@ func _draw_stars(origin: Vector2) -> void:
 			draw_line(p - Vector2(2.4, 0.0), p + Vector2(2.4, 0.0), Color(0.87, 0.91, 0.98, shimmer * 0.35), 0.65, true)
 
 func _draw_meteor_shower(origin: Vector2) -> void:
-	# These streaks exist only during the event; all positions wrap in screen space.
 	for i in meteors.size():
 		var meteor := meteors[i]
 		var speed: float = meteor.z
@@ -85,11 +100,34 @@ func _draw_meteor_shower(origin: Vector2) -> void:
 		var y := fposmod(meteor.y * viewport_size.y + meteor_elapsed * speed, viewport_size.y)
 		var head := origin + Vector2(x, y)
 		var tail := head + Vector2(-meteor_direction * meteor.w * 0.55, -meteor.w)
-		var glow := Color(0.83, 0.89, 0.98, 0.22)
-		var core := Color(0.95, 0.97, 1.0, 0.72)
-		draw_line(tail, head, glow, 3.0, true)
-		draw_line(tail, head, core, 1.0, true)
+		draw_line(tail, head, Color(0.83, 0.89, 0.98, 0.22), 3.0, true)
+		draw_line(tail, head, Color(0.95, 0.97, 1.0, 0.72), 1.0, true)
 		draw_circle(head, 1.4, Color(0.98, 0.99, 1.0, 0.9))
+
+func _draw_purge_planet(origin: Vector2) -> void:
+	# The miniature red occult planet and its orbit animate in, pulse, then fade away.
+	var t := purge_alpha
+	var center := origin + Vector2(viewport_size.x * 0.22, viewport_size.y * 0.30)
+	var appear := minf(1.0, t * 2.4)
+	var pulse := 0.82 + 0.18 * sin(purge_clock * 7.0)
+	var radius := viewport_size.x * 0.052 * appear
+	var red := Color(0.92, 0.10, 0.20, 0.72 * t * pulse)
+	var dim_red := Color(0.82, 0.08, 0.18, 0.30 * t)
+	# Broken orbit rings and a lightly glowing planetary disk.
+	_draw_ellipse(center, Vector2(radius * 2.35, radius * 0.63), dim_red, 1.2)
+	_draw_ellipse(center, Vector2(radius * 1.78, radius * 0.46), red, 0.85)
+	draw_circle(center, radius, Color(0.11, 0.025, 0.045, 0.95 * t))
+	draw_arc(center, radius, -2.6, 0.75, 40, red, 1.4, true)
+	# Three rotating sigils/orbit points.
+	for i in 3:
+		var angle := purge_clock * 1.2 + TAU * float(i) / 3.0
+		var point := center + Vector2(cos(angle) * radius * 1.58, sin(angle) * radius * 0.56)
+		draw_circle(point, 1.8 * appear, Color(1.0, 0.28, 0.35, 0.88 * t))
+	# Short rays radiate softly during the warning, without adding text.
+	for i in 8:
+		var angle := TAU * float(i) / 8.0 + purge_clock * 0.18
+		var direction := Vector2(cos(angle), sin(angle))
+		draw_line(center + direction * radius * 1.9, center + direction * radius * (2.3 + 0.15 * sin(purge_clock * 3.0 + float(i))), Color(0.9, 0.14, 0.23, 0.24 * t), 0.8, true)
 
 func _draw_distant_world(origin: Vector2) -> void:
 	var center := origin + Vector2(viewport_size.x * 0.82, viewport_size.y * 0.34)

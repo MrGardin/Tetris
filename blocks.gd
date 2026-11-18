@@ -1,14 +1,11 @@
 extends Node2D
-## Owns block spawning, physics, commands, and block appearance.
-## Tile centers use integer CELL coordinates; physics placement remains continuous.
+## Block spawning, physics, commands, visuals, wind and meteor-event purge.
 
 const CELL := 27.0
-const TILE_INSET := 1.35
-const TILE_BORDER := TILE_INSET
+const TILE_BORDER := 1.35
 const TILE_SIZE := CELL
-# Tune this value to change how strongly the meteor-shower gust pushes blocks.
-const WIND_ACCELERATION := 50.0 # world pixels/s^2
-
+const WIND_ACCELERATION := 50.0
+const PURGE_FADE_TIME := 0.42
 const SHAPES := [
 	[Vector2(-1, 0), Vector2(0, 0), Vector2(1, 0), Vector2(2, 0)],
 	[Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)],
@@ -26,15 +23,25 @@ class Piece extends RigidBody2D:
 	var x_limit := 270.0
 	var commands: Array[int] = []
 	var box := RectangleShape2D.new()
+	var purge_marked := false
+	var purge_committed := false
+	var purge_clock := 0.0
+	var purge_warning_duration := 2.2
 
 	func command(action: int) -> void:
-		if controlled:
+		if controlled and not purge_committed:
 			commands.append(action)
 			sleeping = false
 
 	func release_control() -> void:
 		controlled = false
 		commands.clear()
+
+	func mark_for_purge(warning_duration: float) -> void:
+		purge_marked = true
+		purge_clock = 0.0
+		purge_warning_duration = warning_duration
+		queue_redraw()
 
 	func fits_width(t: Transform2D) -> bool:
 		var radius := TILE_SIZE * 0.5 * (absf(t.x.x) + absf(t.y.x))
@@ -43,8 +50,13 @@ class Piece extends RigidBody2D:
 				return false
 		return true
 
+	func _process(delta: float) -> void:
+		if purge_marked and not purge_committed:
+			purge_clock += delta
+			queue_redraw()
+
 	func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
-		if not controlled or commands.is_empty():
+		if not controlled or purge_committed or commands.is_empty():
 			return
 		var cmd: int = commands.pop_front()
 		var t := state.transform
@@ -78,15 +90,19 @@ class Piece extends RigidBody2D:
 
 	func _draw() -> void:
 		var half := CELL * 0.5
+		var flash := purge_marked and not purge_committed and fposmod(purge_clock, 0.32) < 0.16
 		for cell: Vector2 in cells:
 			var center := cell * CELL
 			var outer := Rect2(center - Vector2.ONE * half, Vector2.ONE * TILE_SIZE)
 			var inner := outer.grow(-TILE_BORDER)
 			draw_rect(outer, Color("#05070b"))
-			draw_rect(inner, Color("#e9edf3"))
+			draw_rect(inner, Color("#ff273d") if flash else Color("#e9edf3"))
+			if purge_marked and not purge_committed:
+				draw_arc(center, CELL * 0.37, 0.0, TAU, 24, Color(1.0, 0.16, 0.25, 0.9 if flash else 0.36), 1.2, true)
 
 var active: Piece
 var pieces: Array[Piece] = []
+var purge_targets: Array[Piece] = []
 var viewport_size := Vector2(540.0, 960.0)
 var camera_y := 0.0
 var contact_time := 0.0
@@ -131,12 +147,48 @@ func command(action: int) -> void:
 func top_y(fallback_y: float) -> float:
 	var top := fallback_y
 	for body in pieces:
-		if body.controlled:
+		if body.controlled or body.purge_committed:
 			continue
 		var extent := TILE_SIZE * 0.5 * (absf(cos(body.rotation)) + absf(sin(body.rotation)))
 		for cell: Vector2 in body.cells:
 			top = minf(top, (body.transform * (cell * CELL)).y - extent)
 	return top
+
+func begin_purge_warning(count: int, warning_duration: float) -> void:
+	purge_targets.clear()
+	var eligible: Array[Piece] = []
+	for body in pieces:
+		if is_instance_valid(body) and not body.purge_committed:
+			eligible.append(body)
+	eligible.shuffle()
+	var amount := mini(count, eligible.size())
+	for i in amount:
+		var body := eligible[i]
+		body.mark_for_purge(warning_duration)
+		purge_targets.append(body)
+
+func execute_purge() -> void:
+	for body in purge_targets:
+		if not is_instance_valid(body):
+			continue
+		body.purge_committed = true
+		body.commands.clear()
+		body.freeze = true
+		body.set_collision_layer_value(1, false)
+		body.set_collision_mask_value(1, false)
+		for child in body.get_children():
+			if child is CollisionShape2D:
+				child.set_deferred("disabled", true)
+		if body == active:
+			active = null
+			spawn_wait = 0.0
+		pieces.erase(body)
+		var tween := create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(body, "scale", body.scale * 0.18, PURGE_FADE_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tween.tween_property(body, "modulate", Color(1.0, 0.12, 0.22, 0.0), PURGE_FADE_TIME)
+		tween.chain().tween_callback(body.queue_free)
+	purge_targets.clear()
 
 func _spawn() -> void:
 	var shape_index := randi_range(0, SHAPES.size() - 1)
@@ -180,12 +232,8 @@ func _physics_process(dt: float) -> void:
 				spawn_wait = 0.35
 			pieces.remove_at(i)
 			body.queue_free()
-
-		# Constant low acceleration affects every existing block, active or settled.
-		# Change WIND_ACCELERATION above to tune the strength of the gust.
 		if wind_direction != 0 and is_instance_valid(body):
 			body.apply_central_force(Vector2(wind_direction * WIND_ACCELERATION * body.mass, 0.0))
-
 	if is_instance_valid(active):
 		contact_time = contact_time + dt if active.get_contact_count() > 0 else 0.0
 		if contact_time >= 0.24:

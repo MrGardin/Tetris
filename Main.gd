@@ -1,6 +1,6 @@
 extends Node2D
 ## Godot 4.5.x. Game-level input, camera, platform physics and victory countdown.
-## Child nodes: Visual (scene graphics), Blocks (block simulation), Events (timed events).
+## Child nodes: Visual, Blocks and Events.
 
 const PLATFORM_Y := 300.0
 const TARGET_Y := PLATFORM_Y - 450.0
@@ -35,6 +35,9 @@ func _ready() -> void:
 	blocks.connect("block_result", _on_block_result)
 	events.connect("meteor_event_started", _on_meteor_event_started)
 	events.connect("meteor_event_ended", _on_meteor_event_ended)
+	events.connect("purge_event_started", _on_purge_event_started)
+	events.connect("purge_event_execute", _on_purge_event_execute)
+	events.connect("purge_event_ended", _on_purge_event_ended)
 
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -75,6 +78,16 @@ func _on_meteor_event_started(direction: int) -> void:
 func _on_meteor_event_ended() -> void:
 	blocks.call("set_wind_direction", 0)
 	visual.call("set_meteor_event", false, 0)
+
+func _on_purge_event_started(warning_duration: float) -> void:
+	blocks.call("begin_purge_warning", 1, warning_duration)
+	visual.call("set_purge_event", true)
+
+func _on_purge_event_execute() -> void:
+	blocks.call("execute_purge")
+
+func _on_purge_event_ended() -> void:
+	visual.call("set_purge_event", false)
 
 func _input(e: InputEvent) -> void:
 	if won:
@@ -166,13 +179,12 @@ func _physics_process(dt: float) -> void:
 		feedback_time -= dt
 		if feedback_time <= 0.0:
 			sheet.set_selected(-1)
-
 	var top: float = float(blocks.call("top_y", PLATFORM_Y))
 	if won:
 		blocks.call("set_spawning_enabled", false)
 	elif top <= TARGET_Y:
 		if countdown < 0.0:
-			countdown = 3.0
+			countdown = 5.0
 		countdown = maxf(0.0, countdown - dt)
 		blocks.call("set_spawning_enabled", false)
 		if countdown <= 0.0:
@@ -182,7 +194,6 @@ func _physics_process(dt: float) -> void:
 	else:
 		countdown = -1.0
 		blocks.call("set_spawning_enabled", true)
-
 	var target_camera_y := minf(camera.position.y, top + screen_size.y * 0.18)
 	camera.position.y = lerpf(camera.position.y, target_camera_y, minf(1.0, dt * 3.0))
 	blocks.call("set_camera_y", camera.position.y)
