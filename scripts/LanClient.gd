@@ -1,89 +1,94 @@
 extends Node
 class_name LanClient
-## WebSocket-клиент Tetris:Windbound.
-## Подключается к серверу, отправляет запросы и получает ответы.
+## Сетевой клиент. Добавь в Autoload с именем Net.
 
 signal status_changed(text: String)
-signal match_found(room_code: String, role: String)
 signal room_created(room_code: String)
+signal match_found(room_code: String, role: String)
+signal match_started
 signal opponent_left
-signal server_message(data: Dictionary)
+signal opponent_progress_received(value: float)
+signal match_result_received(result: String, message: String)
 
-const DEFAULT_SERVER_URL := "wss://portsmouth-joining-examined-munich.trycloudflare.com"
+const SERVER_URL: String = "wss://areas-momentum-alpine-figured.trycloudflare.com"
 
-var server_url := DEFAULT_SERVER_URL
+var room_code: String = ""
+var player_role: String = ""
+var match_ready: bool = false
 
-var _socket := WebSocketPeer.new()
-var _pending_message: Dictionary = {}
-var _was_open := false
+var _socket: WebSocketPeer = WebSocketPeer.new()
+var _pending_messages: Array[Dictionary] = []
+var _was_open: bool = false
+var _closed_notice_sent: bool = false
 
 
 func _process(_delta: float) -> void:
 	_socket.poll()
 
-	var state := _socket.get_ready_state()
+	var state: int = _socket.get_ready_state()
 
 	if state == WebSocketPeer.STATE_OPEN:
 		if not _was_open:
 			_was_open = true
+			_closed_notice_sent = false
 			status_changed.emit("Подключено к серверу.")
 
-		if not _pending_message.is_empty():
-			var message_to_send := _pending_message
-			_pending_message = {}
-			_send_now(message_to_send)
+		while not _pending_messages.is_empty():
+			# pop_front() возвращает Variant, поэтому тип задаём явно.
+			var data: Dictionary = _pending_messages.pop_front()
+			_send_now(data)
 
 		while _socket.get_available_packet_count() > 0:
-			var packet := _socket.get_packet()
-			var text := packet.get_string_from_utf8()
-			_handle_server_message(text)
+			var packet: PackedByteArray = _socket.get_packet()
+			_handle_message(packet.get_string_from_utf8())
 
-	elif state == WebSocketPeer.STATE_CLOSED:
-		if _was_open:
-			_was_open = false
+	elif state == WebSocketPeer.STATE_CLOSED and _was_open:
+		_was_open = false
+
+		if not _closed_notice_sent:
+			_closed_notice_sent = true
 			status_changed.emit("Соединение с сервером закрыто.")
 
 
 func find_random_player() -> void:
-	_request({
-		"type": "find_random"
-	})
+	_send_or_queue({"type": "find_random"})
 
 
 func cancel_search() -> void:
-	_request({
-		"type": "cancel_search"
-	})
+	_send_or_queue({"type": "cancel_search"})
 
 
 func create_room() -> void:
-	_request({
-		"type": "create_room"
-	})
+	_send_or_queue({"type": "create_room"})
 
 
-func join_room(room_code: String) -> void:
-	_request({
+func join_room(code: String) -> void:
+	_send_or_queue({
 		"type": "join_room",
-		"room": room_code.strip_edges().to_upper()
+		"room": code.strip_edges().to_upper()
 	})
 
 
-func send_progress(height: float) -> void:
-	_request({
+func send_progress(value: float) -> void:
+	_send_or_queue({
 		"type": "progress",
-		"height": height
+		"progress": clampf(value, 0.0, 1.0)
 	})
+
+
+func send_goal_reached() -> void:
+	_send_or_queue({"type": "goal_reached"})
 
 
 func send_game_over() -> void:
-	_request({
-		"type": "game_over"
-	})
+	_send_or_queue({"type": "game_over"})
 
 
 func close_connection() -> void:
-	_pending_message = {}
+	_pending_messages.clear()
+	match_ready = false
+	room_code = ""
+	player_role = ""
 
 	if _socket.get_ready_state() != WebSocketPeer.STATE_CLOSED:
 		_socket.close()
@@ -91,74 +96,93 @@ func close_connection() -> void:
 	_was_open = false
 
 
-func _request(data: Dictionary) -> void:
-	var state := _socket.get_ready_state()
+func _send_or_queue(data: Dictionary) -> void:
+	var state: int = _socket.get_ready_state()
 
 	if state == WebSocketPeer.STATE_OPEN:
 		_send_now(data)
 		return
 
+	_pending_messages.append(data)
+
 	if state == WebSocketPeer.STATE_CONNECTING:
-		_pending_message = data
 		status_changed.emit("Подключаемся к серверу...")
 		return
 
-	if server_url.strip_edges().is_empty():
-		status_changed.emit("Не задан адрес сервера.")
-		return
-
 	_socket = WebSocketPeer.new()
-	_pending_message = data
+	_was_open = false
+	_closed_notice_sent = false
 
-	var error := _socket.connect_to_url(server_url.strip_edges())
+	var error: Error = _socket.connect_to_url(SERVER_URL)
 	if error != OK:
-		_pending_message = {}
-		status_changed.emit("Не удалось начать подключение. Код: %s" % error)
+		_pending_messages.clear()
+		status_changed.emit("Не удалось подключиться. Код ошибки: %s" % error)
 		return
 
-	_was_open = false
 	status_changed.emit("Подключаемся к серверу...")
 
 
 func _send_now(data: Dictionary) -> void:
-	var error := _socket.send_text(JSON.stringify(data))
+	if _socket.get_ready_state() != WebSocketPeer.STATE_OPEN:
+		_pending_messages.push_front(data)
+		return
 
+	var error: Error = _socket.send_text(JSON.stringify(data))
 	if error != OK:
-		status_changed.emit("Не удалось отправить запрос серверу.")
+		status_changed.emit("Не удалось отправить сообщение серверу.")
 
 
-func _handle_server_message(text: String) -> void:
-	var parsed: Variant = JSON.parse_string(text)
+func _handle_message(raw_text: String) -> void:
+	var parsed: Variant = JSON.parse_string(raw_text)
 
 	if not parsed is Dictionary:
-		status_changed.emit("Сервер прислал некорректное сообщение.")
+		status_changed.emit("Сервер прислал некорректный ответ.")
 		return
 
 	var data: Dictionary = parsed
-	server_message.emit(data)
 
 	match str(data.get("type", "")):
 		"searching":
 			status_changed.emit("Ищем случайного соперника...")
+
 		"search_cancelled":
 			status_changed.emit("Поиск отменён.")
+
 		"room_created":
-			var code := str(data.get("room", ""))
-			room_created.emit(code)
-			status_changed.emit("Комната создана. Код: %s" % code)
+			room_code = str(data.get("room", ""))
+			room_created.emit(room_code)
+			status_changed.emit("Комната создана. Код: %s" % room_code)
+
 		"match_found":
-			var code := str(data.get("room", ""))
-			var role := str(data.get("role", ""))
-			match_found.emit(code, role)
-			status_changed.emit("Соперник найден! Код комнаты: %s" % code)
+			room_code = str(data.get("room", ""))
+			player_role = str(data.get("role", ""))
+			match_found.emit(room_code, player_role)
+			status_changed.emit("Соперник найден.")
+
 		"game_start":
-			status_changed.emit("Оба игрока подключены. Матч найден.")
+			room_code = str(data.get("room", room_code))
+			match_ready = true
+			match_started.emit()
+			status_changed.emit("Матч начинается!")
+
+		"progress":
+			opponent_progress_received.emit(
+				clampf(float(data.get("progress", 0.0)), 0.0, 1.0)
+			)
+
+		"match_result":
+			var result: String = str(data.get("result", ""))
+			var message: String = str(data.get("message", "Матч завершён."))
+			match_result_received.emit(result, message)
+			status_changed.emit(message)
+
 		"opponent_left":
+			match_ready = false
 			opponent_left.emit()
 			status_changed.emit("Соперник отключился.")
+
 		"error":
 			status_changed.emit(str(data.get("message", "Ошибка сервера.")))
-		"progress":
-			status_changed.emit("Получен прогресс соперника.")
+
 		_:
 			pass
