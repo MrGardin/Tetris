@@ -3,7 +3,7 @@ extends Node2D
 ## Центрируется между безопасными отступами экрана; при нехватке места прокручивается.
 
 @export_file("*.tscn")
-var start_scene_path: String = "res://scenes/Start/Start.tscn"
+var start_scene_path: String = "res://scenes/MultiplayerMenu/MultiplayerMenu.tscn"
 
 @export_file("*.tscn")
 var main_scene_path: String = "res://Main.tscn"

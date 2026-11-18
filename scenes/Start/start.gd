@@ -2,7 +2,7 @@ extends Node2D
 ## Космический стартовый экран Tetris:Windbound.
 
 @export_file("*.tscn")
-var main_scene_path: String = "res://Main.tscn"
+var main_scene_path: String = "res://scenes/MultiplayerMenu/MultiplayerMenu.tscn"
 
 @export_file("*.tscn")
 var how_to_scene_path: String = "res://scenes/HowToPlay/HowToPlay.tscn"

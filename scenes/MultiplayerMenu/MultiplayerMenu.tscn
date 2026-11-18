@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://2f3inybrv578"]
+
+[ext_resource type="Script" uid="uid://dqr27pbrcsgf4" path="res://scenes/MultiplayerMenu/multiplayer_menu.gd" id="1_sblvh"]
+
+[node name="MultiplayerMenu" type="Node2D"]
+script = ExtResource("1_sblvh")
